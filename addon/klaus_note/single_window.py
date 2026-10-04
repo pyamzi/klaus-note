@@ -590,10 +590,13 @@ def _alive_visible(widget) -> bool:
 
 def focus_in_editor() -> bool:
     """Focus is inside the Add page's editor slot or the Edit dock: the
-    place where a state-shortcut key must type instead of answering."""
+    place where a state-shortcut key must type instead of answering.
+    Never a hidden editor: nobody is typing into a tab that isn't showing."""
     from aqt.qt import QApplication
 
     fw = QApplication.focusWidget()
+    if fw is None or not _alive_visible(fw):
+        return False
     if _state.add is not None and _inside(fw, _state.add.editor_slot):
         return True
     return any(_inside(fw, d) for d in _state.docks.values())
@@ -992,6 +995,46 @@ def _on_op_executed(changes, handler) -> None:
 def _on_focus_did_change(new, old) -> None:
     if _state.host is not None and _inside(new, _state.host.pages["browse"]):
         _redraw_browse()
+    _keep_focus_visible(new, old)
+
+
+def _keep_focus_visible(new, old) -> None:
+    """Keyboard focus never rests on a widget in a hidden tab or dock.
+    Anki's hosted windows keep running their own handlers there: Add
+    answers every reviewed card (operation_did_execute with changes.deck)
+    with editor.set_note(focusTo=…), and its webview calls setFocus(). In
+    its own window that never reached the reviewer; in the host it took
+    the keyboard, and Space typed into the hidden Add form instead of
+    answering the card. Focus goes back where it came from a tick later,
+    never inside the focusChanged emission, and only if the hidden widget
+    still holds it."""
+    mw = _state.mw
+    if mw is None or new is None or not is_active():
+        return
+    try:
+        if new.window() is not mw or new.isVisible() or not mw.isVisible():
+            return
+    except RuntimeError:
+        return
+
+    def restore() -> None:
+        from aqt.qt import QApplication
+
+        try:
+            if QApplication.focusWidget() is not new:
+                return
+            back = old if old is not None and _alive_visible(old) and old.window() is mw else None
+            web = getattr(mw, "web", None)
+            if back is None and web is not None and _alive_visible(web):
+                back = web
+            if back is not None:
+                back.setFocus(Qt.FocusReason.OtherFocusReason)
+            else:
+                new.clearFocus()
+        except RuntimeError:
+            pass
+
+    QTimer.singleShot(0, restore)
 
 
 # ── the right dock area shared with Klaus's own docks ────────────────────

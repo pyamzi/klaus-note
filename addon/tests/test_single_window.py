@@ -486,6 +486,33 @@ mw6.web.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 mw6.web.setFocus()
 app.processEvents()
 check("…and not focus on the deck screen", sw.focus_in_editor() is False)
+
+# The double-Space bug: answering a card fires operation_did_execute with
+# changes.deck, the hosted AddCards answers with editor.set_note(focusTo=…)
+# and its editor webview calls setFocus() from the hidden Add tab. Stock
+# Anki's Add is its own window, so that never reached the reviewer; inside
+# the host it took the keyboard and every Space typed into the hidden form.
+host6.switch("decks")
+QtWidgets.QApplication.setActiveWindow(mw6)
+a.field.setFocus()
+app.processEvents()
+check("a hidden editor holding focus does not turn the review keys into typing",
+      QtWidgets.QApplication.focusWidget() is a.field and sw.focus_in_editor() is False)
+mw6.web.setFocus()
+app.processEvents()
+routed = lambda old, new: sw._on_focus_did_change(new, old)  # noqa: E731 - Anki's main.on_focus_changed
+app.focusChanged.connect(routed)
+a.field.setFocus()
+pump()
+check("a hidden Add editor that takes focus hands it straight back to the deck screen",
+      QtWidgets.QApplication.focusWidget() is mw6.web,
+      f"focus={type(QtWidgets.QApplication.focusWidget()).__name__}")
+check("…so Space is a review key again, not typing", sw.focus_in_editor() is False)
+host6.switch("add")
+a.field.setFocus()
+pump()
+check("on the Add tab the editor keeps the focus it takes", QtWidgets.QApplication.focusWidget() is a.field)
+app.focusChanged.disconnect(routed)
 a._close_event_has_cleaned_up = True  # Anki's own teardown
 a.close()
 a.deleteLater()
