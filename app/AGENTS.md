@@ -2,6 +2,16 @@
 
 A Tauri rewrite of Anki: spaced-repetition flashcards (priority), a PDF annotator with lecture recorder, and a Markdown/LaTeX editor. Reference apps live in `references/` (gitignored): leed_pdf_viewer, openwhispr, siyuan, zed.
 
+## Reference and delivery order
+
+User direction (2026-10-06): build the app's Anki foundation first, then layer KlausNote for Anki features on top. [Upstream Anki](https://github.com/ankitects/anki) is the primary behavior and implementation reference; the add-on is the reference for Klaus-specific extensions.
+
+1. Before implementing a feature, inspect the relevant code in the pinned `vendor/anki` checkout: backend and protocol, TypeScript editor/reviewer/pages, and Python/Qt host logic where it defines behavior. Reuse Anki's existing engine and contracts through the app's bridge. See [ADR-0001](docs/adr/0001-build-on-anki-rslib.md) and [ADR-0006](docs/adr/0006-ui-talks-only-to-the-bridge.md).
+2. Implement and verify the affected Anki workflow first: Collection operations, decks, Study/scheduling, Note editing, Browser/search, media, undo, import/export, preferences, or sync. A served page or working layout alone does not establish behavior parity. Check persisted data and failure handling using scratch collections.
+3. Then add the corresponding KlausNote for Anki workspace, PDF/Library, retention, OCR, model, or other extension behavior, with regression checks for the Anki foundation underneath. Adapt extensions to the app's stack, following [ADR-0004](docs/adr/0004-no-python-addons.md).
+
+Delivery checklist: [add-on parity plan](docs/research/addon-app-parity.md). Close relevant core behavior gaps before prioritizing add-on enhancements.
+
 ## Develop
 
 Anki is a pinned git submodule at `vendor/anki` (ADR-0001); its crates are path dependencies. Prerequisites: Rust (toolchain pinned in `rust-toolchain.toml`), Node 22, `protoc` (`brew install protobuf`).
@@ -13,10 +23,11 @@ npm install
 npm run tauri dev               # build frontend + run the app
 cargo test -p klaus-bridge      # the one automated seam
 npm run check                   # typecheck the frontend
-npx tauri build --bundles app && ditto target/release/bundle/macos/KlausNote.app /Applications/KlausNote.app   # install the app
+npm run install:local           # build and refresh /Applications/Klaus.app
 ```
 
 - `crates/bridge`: the Backend Bridge. Serves the frontend and Anki's `/_anki/<method>` contract from 127.0.0.1; only methods in its allowlist are callable from the webview.
+- Local delivery preference (2026-10-06): after finishing and verifying KlausNote app updates, refresh the existing `/Applications/Klaus.app` with `npm run install:local`. Keep this stable path so the user's Applications/Dock shortcut opens the current local build. The installer preserves a previous bundle in `target/local-install-backups`, leaves collection data untouched, and does not launch a window. Visible testing must stay on Desktop 4; use headless checks until placement there is verified.
 - `src-tauri`: the Tauri shell. Opens the Collection in the app data dir and points the window at the bridge.
 - `src/`: SvelteKit frontend (assets under `/_klaus`). `@generated` is Anki's TS library, generated into `vendor/anki/out/ts/lib/generated` by `npm run gen`.
 - Anki's own pages (import, deck options, graphs, …) are built from `vendor/anki/ts` by `scripts/build-anki-pages.sh` (Anki's pinned yarn; skipped when already built for the current Anki commit) and served by the bridge at their Anki routes plus `/_app`. Requests those pages make to their Qt host go to the shell as hooks (native dialogs, navigation) or are answered by the bridge (profile settings in `klaus-settings.json` beside the Collection, pasted-image conversion). `static/anki-host.js` stands in for Qt's `bridgeCommand`/`pycmd` and is injected, with `anki-host.css`, into every Anki page; media files are served at the page-relative URLs Anki pages use. Tauri's macOS webview has no `alert()`/`confirm()` UI, so `static/native-dialogs.js` (loaded first on KlausNote's and Anki's pages) routes them to the shell's `showMessageBox`/`askUser` with a synchronous request; KlausNote's own screens use in-page `<dialog>`s for input instead of `prompt()`. Deck options' save (`updateDeckConfigs`) returns at once and runs in the background, as in Anki, then fires `deckOptionsRequireClose` (or `showMessageBox` on failure).

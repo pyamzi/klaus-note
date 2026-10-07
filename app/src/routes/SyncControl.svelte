@@ -91,7 +91,7 @@
     watchMedia();
   }
 
-  async function syncNow() {
+  export async function syncNow() {
     if (running) return;
     if (!account.email) return signIn();
     if (needsChoice) return askFullSync(outcome);

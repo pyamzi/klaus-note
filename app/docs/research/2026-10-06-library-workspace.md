@@ -1,0 +1,31 @@
+# Library workspace delivery
+
+## Result
+
+The desktop navigation destination formerly labelled Add is now Library. It opens the confirmed three-pane workspace: files and folders, a PDF reader, and Anki's real Add editor. The editor's submission button remains Add because it creates a Note. The existing `a` shortcut opens Library. [Navigation](../../src/routes/StudyChrome.svelte), [workspace](../../src/routes/library/+page.svelte), [confirmed scope](library-workspace.md).
+
+Library supports folder creation, PDF import, filtering visible files, refresh, paging, zoom, search, selectable text, copying, and insertion into the last focused card field. Pane toggles and narrow-screen switches retain the mounted editor and its unfinished draft. Workspace selection, page positions, expanded folders, pane visibility, and widths are saved through Anki config. App navigation asks Anki to check unfinished input before leaving. [Workspace](../../src/routes/library/+page.svelte), [reader](../../src/lib/library/PdfReader.svelte), [editor host](../../static/anki-host.js).
+
+The follow-up top-bar change moves Files, Reader, and Card controls into the shared navigation header and removes their separate Library title row. The accessible Library heading remains available to assistive technology. Narrow layouts wrap the controls within the same header. Both browser workflows assert that the pane controls belong to the header. [Shared top bar](../../src/routes/StudyChrome.svelte), [workspace](../../src/routes/library/+page.svelte), [browser assertions](../../tests/library-workspace.test.mjs).
+
+PDFs are plain local files under the collection's Library directory, or an absolute configured `libraryRoot`. Imports refuse existing names and invalid paths rather than overwriting documents. Import/read size is limited to 128 MiB. The reader keeps one active canvas, capped at 4096 pixels per side and 8 Mi pixels total; document switches destroy the previous PDF task and cancel its HTTP read. These bounds are not a diagnosis of the earlier 140 GB Anki incident. [File bridge](../../crates/bridge/src/library.rs), [client storage](../../src/lib/library/storage.ts), [raster cleanup](../../src/lib/library/PdfPage.svelte), [document lifecycle](../../src/lib/library/PdfReader.svelte).
+
+WebKit requires a Library-scoped Anki focus hook when shadow-root selection is unavailable. The hook clears unsupported caret restoration and uses Anki's input focus API. This preserves typed content when inserting selected PDF text into an editor that was hidden. Anki vendor source was not changed for this compatibility fix. [Host hook](../../static/anki-host.js), [insertion](../../src/routes/library/+page.svelte), [host tests](../../tests/library-host.test.cjs).
+
+## Verification
+
+The [verification record](../../.impeccable/review/library/verification.json) captures final check counts, browser results, and installation verification.
+
+- `cargo test -p klaus-bridge`: 46 tests passed, including seven Library storage tests covering plain-file persistence, external file changes, collisions, invalid paths, symlinks, configured roots, and oversized documents. [Library tests](../../crates/bridge/tests/library.rs).
+- `node --test tests/library-host.test.cjs`: eight tests passed, covering declined/accepted discard, empty input, editor Close, malformed checks, existing Browse notifications, and guarded WebKit focus behavior. [Host tests](../../tests/library-host.test.cjs).
+- `npm run check`: zero Svelte errors and warnings. Production frontend and local release builds completed. [Build commands](../../package.json).
+- The full headless workflow passed in Chromium and WebKit with zero browser errors. Both used disposable collections and synthetic PDFs, imported a folder/document, exercised paging/search and unusual page dimensions, inserted selected text into a hidden editor, added a real Note, then independently queried the backend to verify both saved fields. Both also checked draft retention, declined/accepted navigation, persisted PDF bytes, restored selection, and narrow-screen layout. [Test implementation](../../tests/library-workspace.test.mjs), [Chromium result](../../.impeccable/review/library/result-chromium.json), [WebKit result](../../.impeccable/review/library/result-webkit.json).
+- Desktop light, desktop dark, empty desktop, narrow Reader, and narrow Card captures were inspected. The initial workspace's independent finish review returned ship with no material visual fixes. After the top-bar follow-up, all five captures were refreshed and inspected by the primary agent. The design evidence records the inspected scope and exceptions. [Design evidence](library-workspace-design.md), [desktop preview](../../.impeccable/review/library/desktop.png), [dark preview](../../.impeccable/review/library/desktop-dark.png), [narrow Reader](../../.impeccable/review/library/mobile.png), [narrow Card](../../.impeccable/review/library/mobile-card.png).
+
+Headless tests supply the user's discard decision because the scratch bridge has no native dialog UI. They exercise the real Anki close check and Library guard. Browser checks do not establish the appearance of an installed Tauri window. No visible native window was opened because Desktop 4 placement was not verified. Tests did not use the user's real collection or add-on files. [Test isolation and confirmation](../../tests/library-workspace.test.mjs), [visible-test constraint](../../AGENTS.md).
+
+This change implements the confirmed core workspace. PDF annotation, OCR, web tabs, and drag-to-image-occlusion parity are outside the recorded scope. [Direction contract](library-workspace.md).
+
+## Local delivery
+
+`npm run install:local` completed and refreshed `/Applications/Klaus.app`. The installed bundle passed `codesign --verify --deep --strict` and matched the release bundle with `diff -qr`. The previous bundle is preserved at `target/local-install-backups/previous.ZYyb0Q/Klaus.app`. The installer does not launch a window or modify collection data. [Verification record](../../.impeccable/review/library/verification.json), [installer](../../scripts/install-local.sh), [installed app](/Applications/Klaus.app), [previous bundle](../../target/local-install-backups/previous.ZYyb0Q/Klaus.app).

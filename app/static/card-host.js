@@ -43,7 +43,13 @@
     // forwarded: card JS mustn't trigger them. Typing in the type-in box stays local.
     const forwarded = [" ", "Enter", "1", "2", "3", "4"];
     addEventListener("keydown", (e) => {
-        if (e.target?.id === "typeans" || e.ctrlKey || e.metaKey || !forwarded.includes(e.key)) return;
+        if (e.target?.id === "typeans" || e.ctrlKey || e.metaKey) return;
+        if (e.key.toLowerCase() === "r" || e.key === "F5") {
+            e.preventDefault();
+            toParent({ cmd: "replayAudio" });
+            return;
+        }
+        if (!forwarded.includes(e.key)) return;
         toParent({ key: e.key });
     });
 })();

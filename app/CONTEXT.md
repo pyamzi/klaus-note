@@ -29,7 +29,7 @@ A Markdown file with LaTeX math; the Wikipedia-style article of KlausNote.
 _Avoid_: Note, text note, article, markdown file
 
 **Document**:
-A PDF file, imported or created blank in KlausNote. Its annotations and Transcripts live inside the PDF.
+A PDF file, imported or created blank in KlausNote. A Lecture's Source deck is a Document kept unaltered.
 _Avoid_: PDF (as a domain term), file, slides
 
 **PDF page**:
@@ -62,6 +62,36 @@ _Avoid_: Attach, bookmark
 A user's explicit choice that a Related Card does not belong to a Section. Always outranks Related.
 _Avoid_: Dismiss, block, suppress
 
+### Lectures
+
+**Lecture**:
+A teaching session's source slides together with its associated Recordings, Transcripts, explanations and personal annotations. A Lecture is the study material as a whole; a Recording is its audio capture.
+_Avoid_: Recording (for the whole lecture), Note
+
+**Source deck**:
+The original, unaltered slide deck supplied for a Lecture.
+_Avoid_: Annotated copy, study export
+
+**Deck revision**:
+One supplied version of a Lecture's Source deck. A corrected deck is a new revision of the same Lecture, without replacing its earlier source.
+_Avoid_: New lecture (for a correction), overwritten original
+
+**Slide**:
+One slide in a Lecture's Source deck. Its associated writing space and explanations do not change the original slide.
+_Avoid_: Page (without qualification), Card
+
+**Lecture sheet**:
+An A4 study page containing a Slide, visible summary notes and personal writing space, with transcript passages available as PDF sticky notes. Lecture sheets use left/right page turns; the original Source deck uses continuous vertical scrolling. Continuation sheets provide additional room for the same Slide.
+_Avoid_: Source slide, Page (without qualification)
+
+**Viewed slide**:
+The Slide currently displayed in the lecture viewer. It can differ from the Recording slide while the student looks back.
+_Avoid_: Recording slide (when referring only to navigation)
+
+**Recording slide**:
+The Slide receiving newly captured lecture speech. It advances when the student views a later Slide and stays put when they browse earlier Slides.
+_Avoid_: Viewed slide (when referring to where speech belongs)
+
 ### Recording
 
 **Recording**:
@@ -69,12 +99,16 @@ One continuous audio capture, such as a lecture or a meeting.
 _Avoid_: Lecture, audio, session
 
 **Clip**:
-The part of a Recording captured while one PDF page was in view, attached to that PDF page. It can be moved to another PDF page afterwards.
+The part of a Recording assigned to one PDF page. In a Lecture it belongs to the Recording slide, which can differ from the Viewed slide; its assignment can be corrected afterwards.
 _Avoid_: Segment, snippet
 
 **Transcript**:
-The text of a Clip, stored on its PDF page like speaker notes; or of a whole Recording made with no Material open, which becomes a Page.
+The text of recorded speech, captured in KlausNote or imported from an existing lecture or video transcript. A Lecture's complete Transcript remains available independently of its generated study PDF and does not require retained audio.
 _Avoid_: Captions, notes
+
+**Audio cache**:
+The temporarily retained audio of a Recording. Its expiry does not remove the Transcript or the student's personal annotations.
+_Avoid_: Transcript, permanent recording archive
 
 ### Screens
 

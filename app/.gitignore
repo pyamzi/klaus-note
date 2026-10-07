@@ -24,3 +24,6 @@ src-tauri/gen/
 
 # Other sessions' worktrees (keep .claude/skills tracked)
 .claude/worktrees/
+
+# Generated PDF.js rendering assets
+/static/pdfjs/

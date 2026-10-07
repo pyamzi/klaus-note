@@ -297,6 +297,63 @@ fn settings_round_trip_and_persist() {
     assert_eq!(get(&bridge, "getProfileConfigJson", "lastColour"), "1");
 }
 
+#[test]
+fn settings_failed_save_preserves_active_and_persisted_values() {
+    let (dir, bridge) = open_temp();
+    let set = |value: &[u8]| SetSettingJsonRequest { key: "autoSync".into(), value_json: value.to_vec() };
+    bridge.call("setProfileConfigJson", &set(b"true").encode_to_vec()).unwrap();
+    let settings = dir.path().join("klaus-settings.json");
+    let preserved = dir.path().join("preserved-settings.json");
+    let before = std::fs::read(&settings).unwrap();
+    std::fs::rename(&settings, &preserved).unwrap();
+    // A destination that cannot be replaced makes persistence fail on any OS.
+    std::fs::create_dir(&settings).unwrap();
+    let sentinel = settings.join("untouched");
+    std::fs::write(&sentinel, b"original").unwrap();
+    assert!(matches!(bridge.call("setProfileConfigJson", &set(b"false").encode_to_vec()), Err(CallError::Backend(_))));
+    let active: generic::Json = call(&bridge, "getProfileConfigJson", generic::String { val: "autoSync".into() });
+    assert_eq!(active.json, b"true", "failed persistence must not change active sync settings");
+    assert_eq!(std::fs::read(&preserved).unwrap(), before);
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"original");
+    assert!(!std::fs::read_dir(dir.path()).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".klaus-settings-")));
+    std::fs::remove_file(sentinel).unwrap();
+    std::fs::remove_dir(&settings).unwrap();
+    std::fs::rename(&preserved, &settings).unwrap();
+    bridge.call("setProfileConfigJson", &set(b"false").encode_to_vec()).unwrap();
+    bridge.close_collection().unwrap();
+    drop(bridge);
+    let reopened = Bridge::new().unwrap();
+    reopened.open_collection(dir.path()).unwrap();
+    let saved: generic::Json = call(&reopened, "getProfileConfigJson", generic::String { val: "autoSync".into() });
+    assert_eq!(saved.json, b"false", "a subsequent successful save persists across restart");
+}
+
+#[test]
+fn unbury_deck_restores_selected_burial_without_unsuspending_cards() {
+    use anki_proto::cards::{Card, CardId};
+    use anki_proto::collection::OpChangesWithCount;
+    use anki_proto::scheduler::{bury_or_suspend_cards_request::Mode as BuryMode, unbury_deck_request::Mode as UnburyMode, BuryOrSuspendCardsRequest, UnburyDeckRequest};
+    let (_dir, bridge) = open_temp();
+    let scheduler = add_note(&bridge, "Basic", &["Scheduler buried", "Back"]);
+    let user = add_note(&bridge, "Basic", &["User buried", "Back"]);
+    let suspended = add_note(&bridge, "Basic", &["Suspended", "Back"]);
+    let original: Card = call(&bridge, "getCard", CardId { cid: suspended });
+    for (cid, mode) in [(scheduler, BuryMode::BurySched), (user, BuryMode::BuryUser), (suspended, BuryMode::Suspend)] {
+        let _: OpChangesWithCount = call(&bridge, "buryOrSuspendCards", BuryOrSuspendCardsRequest { card_ids: vec![cid], note_ids: vec![], mode: mode as i32 });
+    }
+    let queues = || [scheduler, user, suspended].map(|cid| call::<Card>(&bridge, "getCard", CardId { cid }).queue);
+    assert_eq!(queues(), [-2, -3, -1]);
+    let _: OpChanges = call(&bridge, "unburyDeck", UnburyDeckRequest { deck_id: 1, mode: UnburyMode::SchedOnly as i32 });
+    assert_eq!(queues(), [0, -3, -1]);
+    let _: OpChangesWithCount = call(&bridge, "buryOrSuspendCards", BuryOrSuspendCardsRequest { card_ids: vec![scheduler], note_ids: vec![], mode: BuryMode::BurySched as i32 });
+    let _: OpChanges = call(&bridge, "unburyDeck", UnburyDeckRequest { deck_id: 1, mode: UnburyMode::UserOnly as i32 });
+    assert_eq!(queues(), [-2, 0, -1]);
+    let _: OpChanges = call(&bridge, "unburyDeck", UnburyDeckRequest { deck_id: 1, mode: UnburyMode::All as i32 });
+    assert_eq!(queues(), [0, 0, -1]);
+    let retained: Card = call(&bridge, "getCard", CardId { cid: suspended });
+    assert_eq!((retained.reps, retained.due, retained.interval), (original.reps, original.due, original.interval));
+}
+
 #[tokio::test]
 async fn change_notetype_saves_and_closes_only_on_success() {
     let (_dir, bridge) = open_temp();
@@ -1259,4 +1316,89 @@ fn open_and_quit_sync_only_with_auto_sync_on() {
         .find(|outcome| outcome.state() == SyncState::Done && outcome.id > before)
         .expect("the open sync didn't finish within 10 s");
     assert!(outcome.background && ok(&outcome) == ChangesRequired::NoChanges, "{outcome:?}");
+}
+
+#[test]
+fn parity_browser_retention_and_duplicates_use_real_collection_data() {
+    use anki_proto::cards::{Card, CardId};
+    let (_dir, bridge) = open_temp();
+    let first = add_note(&bridge, "Basic", &["<b>Kidney</b> &amp; <img src='nephron.png'>", "A"]);
+    let second = add_note(&bridge, "Basic", &["Kidney &amp; <img src='nephron.png'>", "B"]);
+    let other = add_note(&bridge, "Basic", &["Kidney &amp; <img src='heart.png'>", "C"]);
+    let card: Card = call(&bridge, "getCard", CardId { cid: first });
+    let second_card: Card = call(&bridge, "getCard", CardId { cid: second });
+    let other_card: Card = call(&bridge, "getCard", CardId { cid: other });
+    let request = |value: serde_json::Value| generic::Json { json: serde_json::to_vec(&value).unwrap() };
+    let out: generic::Json = call(&bridge, "klausFindDuplicates", request(serde_json::json!({
+        "noteIds":[card.note_id.to_string(), second_card.note_id.to_string(), other_card.note_id.to_string(), card.note_id.to_string()],
+        "fieldName":"front"
+    })));
+    let result: serde_json::Value = serde_json::from_slice(&out.json).unwrap();
+    assert_eq!(result["groups"].as_array().unwrap().len(), 1);
+    assert_eq!(result["groups"][0]["noteIds"].as_array().unwrap().len(), 2);
+    assert!(result["groups"][0]["text"].as_str().unwrap().contains("nephron.png"));
+    let out: generic::Json = call(&bridge, "klausBrowserRetention", request(serde_json::json!({"ids":[first.to_string()],"notesMode":false})));
+    let result: serde_json::Value = serde_json::from_slice(&out.json).unwrap();
+    assert!(result[&first.to_string()].is_null(), "new cards have no retention estimate");
+    // Graduate the card so an actual review log supplies the estimate.
+    let _: OpChanges = call(&bridge, "setCurrentDeck", DeckId { did: 1 });
+    let top = queue(&bridge).cards[0].clone();
+    let reviewed = top.card.unwrap();
+    let states = top.states.unwrap();
+    let _: OpChanges = call(&bridge, "answerCard", anki_proto::scheduler::CardAnswer {
+        card_id: reviewed.id, current_state: states.current, new_state: states.easy,
+        rating: 4, answered_at_millis: now()*1000, milliseconds_taken: 1000,
+    });
+    let out: generic::Json = call(&bridge, "klausBrowserRetention", request(serde_json::json!({"ids":[reviewed.note_id.to_string()],"notesMode":true})));
+    let result: serde_json::Value = serde_json::from_slice(&out.json).unwrap();
+    let estimate = result[&reviewed.note_id.to_string()].as_f64().unwrap();
+    assert!((0.99..=1.0).contains(&estimate));
+    let invalid = request(serde_json::json!({"ids":["../collection.anki2"],"notesMode":false}));
+    assert!(bridge.call("klausBrowserRetention", &invalid.encode_to_vec()).is_err());
+    let excessive = request(serde_json::json!({"ids":vec![first.to_string();501],"notesMode":false}));
+    assert!(bridge.call("klausBrowserRetention", &excessive.encode_to_vec()).is_err());
+}
+
+#[test]
+fn parity_bulk_actions_and_review_actions_preserve_undo() {
+    use anki_proto::cards::{Card, CardId, SetFlagRequest};
+    use anki_proto::collection::{OpChangesAfterUndo, OpChangesWithCount};
+    let (_dir, bridge) = open_temp();
+    let a = add_note(&bridge, "Basic", &["A", "Back"]);
+    let b = add_note(&bridge, "Basic", &["B", "Back"]);
+    let original: Card = call(&bridge, "getCard", CardId { cid:a });
+    let _: OpChangesWithCount = call(&bridge, "setFlag", SetFlagRequest { card_ids:vec![a,b], flag:3 });
+    let flagged: Card = call(&bridge, "getCard", CardId {cid:b});
+    assert_eq!(flagged.flags & 7, 3);
+    let _: OpChangesAfterUndo = call(&bridge, "undo", Empty {});
+    let unflagged: Card = call(&bridge, "getCard", CardId {cid:b});
+    assert_eq!(unflagged.flags & 7, 0);
+    let _: OpChangesAfterUndo = call(&bridge, "redo", Empty {});
+    let _: OpChangesWithCount = call(&bridge, "buryOrSuspendCards", anki_proto::scheduler::BuryOrSuspendCardsRequest { card_ids:vec![a,b], note_ids:vec![], mode:0 });
+    let suspended: Card = call(&bridge, "getCard", CardId {cid:a});
+    assert_eq!(suspended.queue, -1);
+    assert_eq!(suspended.reps, original.reps);
+    let _: OpChangesWithCount = call(&bridge, "addNoteTags", anki_proto::tags::NoteIdsAndTagsRequest {note_ids:vec![original.note_id], tags:"marked".into()});
+    let marked: Note = call(&bridge, "getNote", NoteId {nid:original.note_id});
+    assert!(marked.tags.contains(&"marked".into()));
+    let _: OpChangesWithCount = call(&bridge, "removeNotes", anki_proto::notes::RemoveNotesRequest { note_ids:vec![original.note_id], card_ids:vec![] });
+    assert!(bridge.call("getCard", &CardId {cid:a}.encode_to_vec()).is_err());
+    let _: OpChangesAfterUndo = call(&bridge, "undo", Empty {});
+    let restored: Card = call(&bridge, "getCard", CardId {cid:a});
+    assert_eq!(restored.note_id, original.note_id);
+    assert_eq!(restored.reps, original.reps);
+}
+
+#[test]
+fn parity_preferences_survive_collection_restart() {
+    let (dir, bridge) = open_temp();
+    let mut prefs: Preferences = call(&bridge, "getPreferences", Empty {});
+    prefs.scheduling.as_mut().unwrap().rollover = 5;
+    let _: OpChanges = call(&bridge, "setPreferences", prefs);
+    bridge.close_collection().unwrap();
+    drop(bridge);
+    let reopened = Bridge::new().unwrap();
+    reopened.open_collection(dir.path()).unwrap();
+    let saved: Preferences = call(&reopened, "getPreferences", Empty {});
+    assert_eq!(saved.scheduling.unwrap().rollover, 5);
 }

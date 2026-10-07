@@ -9,7 +9,9 @@ use prost_reflect::DescriptorPool;
 
 fn main() -> anyhow::Result<()> {
     println!("cargo:rerun-if-changed=proto/klaus.proto");
-    prost_build::compile_protos(&["proto/klaus.proto"], &["proto"])?;
+    prost_build::Config::new()
+        .extern_path(".anki", "::anki_proto")
+        .compile_protos(&["proto/klaus.proto"], &["proto", "../../vendor/anki/proto"])?;
 
     let path = descriptors_path();
     println!("cargo:rerun-if-changed={}", path.display());

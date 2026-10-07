@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "browser": "webkit",
+  "checks": [
+    "folder and PDF import",
+    "selectable PDF",
+    "paging and search",
+    "hidden-editor text insertion",
+    "card creation",
+    "declined and accepted discard",
+    "pane draft retention",
+    "persisted document",
+    "desktop/dark/mobile layout",
+    "bounded canvas"
+  ],
+  "errors": []
+}

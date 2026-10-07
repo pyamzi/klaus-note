@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package klaus;
 
+import "anki/card_rendering.proto";
+
 // klausRenderCard: a card's question and answer HTML exactly as Anki's desktop
 // reviewer shows it (template render, {{FrontSide}}, LaTeX images, media path
 // escaping, play buttons, type-in answer input and comparison).
@@ -16,6 +18,11 @@ message RenderCardRequest {
 message RenderCardResponse {
   string question = 1;
   string answer = 2;
+  repeated anki.card_rendering.AVTag question_av_tags = 3;
+  repeated anki.card_rendering.AVTag answer_av_tags = 4;
+  bool autoplay = 5;
+  bool replay_question_audio = 6;
+  bool interrupt_audio = 7;
 }
 
 // Collection sync through the Klaus Account (ADR-0007, docs/klaus-ink-sync.md).
@@ -65,4 +72,12 @@ message SyncOutcome {
   int64 finished_ms = 9;
   // Started by automatic sync rather than the page.
   bool background = 10;
+}
+
+// Plain Documents in the Library. Paths are relative to its configured root.
+// klausLibraryRead returns data; klausLibraryImport returns the stored path/name.
+message LibraryFile {
+  string path = 1;
+  string name = 2;
+  bytes data = 3;
 }

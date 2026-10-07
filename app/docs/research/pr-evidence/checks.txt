@@ -1,0 +1,58 @@
+Rust
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.78s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+JavaScript
+✔ card commands only reference extracted audio by side and valid index (0.157417ms)
+✔ audio queue honors interrupt, replaces pending clips, and stops when leaving (0.584375ms)
+ℹ tests 53
+ℹ suites 0
+ℹ pass 53
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1369.511167
+
+Svelte
+Loading svelte-check in workspace: /Users/pyamzi/Documents/Github/Klaus/klaus-note/app/.worktrees/pr-20261007/app
+Getting Svelte diagnostics...
+
+svelte-check found 0 errors and 0 warnings
+
+Chromium regressions
+✔ Browser preview accepts its opaque Card frame and rejects unrelated frames (935.14175ms)
+✔ Committed grade survives successor failure and Retry never submits a second answer (459.705375ms)
+✔ Deck overview selectively restores buried Cards and preserves suspended Cards (1006.466375ms)
+✔ Browser retention retries failed rows on revisit without spinning while stationary (2033.79975ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4615.558792
+
+WebKit regressions
+✔ Browser preview accepts its opaque Card frame and rejects unrelated frames (1009.309792ms)
+✔ Committed grade survives successor failure and Retry never submits a second answer (712.689042ms)
+✔ Deck overview selectively restores buried Cards and preserves suspended Cards (1620.140084ms)
+✔ Browser retention retries failed rows on revisit without spinning while stationary (2306.227833ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5799.236166
+
+Startup
+PASS: locked Collection exits cleanly twice without a panic
+PASS: repeat launch forwards to the existing instance before opening the Collection
