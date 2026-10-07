@@ -182,7 +182,7 @@
 {#snippet notetypeItems()}{@render tree(notetypes)}{/snippet}
 {#snippet tagItems()}{@render tree(tags)}{/snippet}
 
-<ScrollArea class="min-h-0 border-r">
+<ScrollArea class="h-full min-h-0 border-r">
   <nav aria-label="Browser sidebar" class="flex flex-col gap-2 p-2">
     {@render section("Saved Searches", savedSearches)}
     {@render section("Today", todayItems)}

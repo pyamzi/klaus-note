@@ -1,6 +1,8 @@
 // Prevents an extra console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod menus;
+
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
@@ -12,18 +14,25 @@ use tauri::{AppHandle, Manager, RunEvent, Theme, Url, WebviewUrl, WebviewWindowB
 use tauri_plugin_dialog::{DialogExt, FileDialogBuilder, MessageDialogBuilder, MessageDialogButtons, MessageDialogKind};
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("KlausNote could not start: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let dir = app.path().app_data_dir()?;
-            // Dev only: a scratch Collection (e.g. a test fixture) instead of the real one.
-            #[cfg(debug_assertions)]
-            let dir = std::env::var_os("KLAUS_DATA_DIR").map(std::path::PathBuf::from).unwrap_or(dir);
-            std::fs::create_dir_all(&dir)?;
-            let bridge = Arc::new(Bridge::with_secrets(Box::new(Keychain))?);
-            bridge.open_collection(&dir).map_err(|e| format!("could not open Collection: {e:?}"))?;
-            app.manage(bridge.clone());
+            let bridge = app.state::<Arc<Bridge>>().inner().clone();
 
             // Both frontends are served by the bridge (same origin as /_anki), not
             // Tauri's asset protocol, because Anki's client fetches root-relative URLs.
@@ -38,10 +47,12 @@ fn main() {
             let sync = app.state::<Arc<Bridge>>().inner().clone();
             sync.sync_in_background();
             sync.start_auto_sync();
+            sync.start_auto_backups();
             println!("KlausNote bridge listening on {addr}");
 
             let base: Url = format!("http://{addr}/").parse()?;
             app.manage(base.clone());
+            menus::install(app.handle(), &token)?;
             let mut url = base.clone();
             // Dev only: open a page directly (e.g. KLAUS_OPEN="review?deck=1").
             #[cfg(debug_assertions)]
@@ -56,11 +67,24 @@ fn main() {
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("KlausNote")
                 .inner_size(1100.0, 750.0)
+                .on_page_load(|window, _| menus::publish_fullscreen(window.app_handle()))
                 .build()?;
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while building KlausNote");
+        .build(tauri::generate_context!())?;
+
+    // Collection errors must return before the native launch callback runs:
+    // Tauri panics on setup errors, which cannot unwind through AppKit.
+    let dir = app.path().app_data_dir()?;
+    #[cfg(debug_assertions)]
+    let dir = std::env::var_os("KLAUS_DATA_DIR").map(std::path::PathBuf::from).unwrap_or(dir);
+    std::fs::create_dir_all(&dir)?;
+    let bridge = Arc::new(Bridge::with_secrets(Box::new(Keychain))?);
+    bridge.open_collection(&dir).map_err(|e| {
+        tauri_plugin_single_instance::destroy(&app);
+        format!("could not open Collection: {e:?}")
+    })?;
+    app.manage(bridge);
 
     // Anki syncs on close (autoSync); Klaus holds the window and the exit until the
     // sync and its media sync are done. A full sync needs a choice, so it's left
@@ -69,10 +93,15 @@ fn main() {
     app.run(move |app, event| match event {
         // Closing the window quits; keep it up (titled "Syncing…") while syncing,
         // or the app would sync invisibly and hold the Collection from a relaunch.
-        RunEvent::WindowEvent { event: WindowEvent::CloseRequested { api, .. }, .. } => {
+        RunEvent::WindowEvent { label, event: WindowEvent::CloseRequested { api, .. }, .. } if label == "main" => {
             if quit.load(Ordering::SeqCst) != QUIT_DONE && start_quit(app, &quit) {
                 api.prevent_close();
+            } else if let Some(settings) = app.get_webview_window("settings") {
+                let _ = settings.close();
             }
+        }
+        RunEvent::WindowEvent { label, event: WindowEvent::Resized(_), .. } if label == "main" => {
+            menus::publish_fullscreen(app);
         }
         RunEvent::ExitRequested { api, .. } => match quit.load(Ordering::SeqCst) {
             QUIT_DONE => {}
@@ -89,6 +118,7 @@ fn main() {
         }
         _ => {}
     });
+    Ok(())
 }
 
 const QUIT_IDLE: u8 = 0;
@@ -148,12 +178,43 @@ impl Secrets for Keychain {
 fn on_hook(app: &AppHandle, method: &str, input: &[u8]) -> Option<Vec<u8>> {
     match method {
         "klausImportPackage" => {
-            let picked = file_dialog(app).add_filter("Anki deck package", &["apkg"]).blocking_pick_file();
+            let picked = file_dialog(app).add_filter("Anki packages and text files", &["apkg", "colpkg", "csv", "tsv", "txt"]).blocking_pick_file();
             if let Some(path) = picked.and_then(|p| p.into_path().ok()) {
-                // Same URL shape as Anki's import dialog: <page>/<quoted path>.
-                navigate(app, &format!("import-anki-package/{}", quote(&path.to_string_lossy())));
+                let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+                if extension == "colpkg" {
+                    if confirm(app, "Replace the current collection with this backup? A backup of your current cards and review history will be saved first. That safety backup excludes images and audio; the imported package can replace media files.", Some("Restore collection"), MessageDialogKind::Warning) {
+                        match app.state::<Arc<Bridge>>().import_collection_package(&path) {
+                            Ok(()) => navigate(app, ""),
+                            Err(error) => { message_dialog(app, format!("Could not restore the collection: {error:?}")).kind(MessageDialogKind::Error).blocking_show(); }
+                        }
+                    }
+                } else {
+                    let page = if extension == "apkg" { "import-anki-package" } else { "import-csv" };
+                    navigate(app, &format!("{page}/{}", quote(&path.to_string_lossy())));
+                }
             }
             None
+        }
+        "klausExportPackage" => {
+            let response = (|| -> Result<bool, String> {
+                let input = generic::Json::decode(input).map_err(|e| e.to_string())?;
+                let request: serde_json::Value = serde_json::from_slice(&input.json).map_err(|e| e.to_string())?;
+                let format = request["format"].as_str().unwrap_or("apkg");
+                if !matches!(format, "apkg" | "colpkg") { return Err("Choose an Anki package format".into()); }
+                let deck = request.get("deckId").and_then(|id| id.as_str())
+                    .map(|id| id.parse::<i64>()).transpose().map_err(|e| e.to_string())?;
+                let name = if format == "colpkg" { "collection.colpkg" } else { "deck.apkg" };
+                let path = file_dialog(app).add_filter("Anki package", &[format]).set_file_name(name)
+                    .blocking_save_file().and_then(|p| p.into_path().ok());
+                let Some(path) = path else { return Ok(false) };
+                app.state::<Arc<Bridge>>().export_package(&path, format, deck).map_err(|e| format!("{e:?}"))?;
+                Ok(true)
+            })();
+            let json = match response {
+                Ok(saved) => serde_json::json!({"saved":saved}),
+                Err(error) => serde_json::json!({"saved":false,"error":error}),
+            };
+            Some(generic::Json { json: serde_json::to_vec(&json).unwrap() }.encode_to_vec())
         }
         // The import page's Close button, deck options after a save or a
         // confirmed discard, and the current editor; the deck list reloads its counts.

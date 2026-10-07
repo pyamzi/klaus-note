@@ -6,7 +6,7 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anki::backend::{init_backend, Backend};
 use anki_proto::backend::{backend_error, BackendError, BackendInit};
@@ -28,6 +28,12 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 
 /// Klaus's own bridge methods' messages (`proto/klaus.proto`).
 mod account;
+mod library;
+mod retention;
+mod browser;
+mod review_media;
+mod transfers;
+mod models;
 mod sync;
 pub use account::{MemorySecrets, Secrets};
 
@@ -94,6 +100,24 @@ use frontend::{ConvertPastedImageRequest, ConvertPastedImageResponse, SetSetting
 /// screens need; grow it per feature. Card HTML can carry arbitrary JS, so the
 /// webview never gets the whole backend.
 const ALLOWED: &[&str] = &[
+    "getPreferences",
+    "setPreferences",
+    "setDeck",
+    "restoreBuriedAndSuspendedCards",
+    "scheduleCardsAsNew",
+    "scheduleCardsAsNewDefaults",
+    "setDueDate",
+    "findAndReplace",
+    "fieldNamesForNotes",
+    // Reviewer actions requested by the shared Home/Study parity work.
+    "getUndoStatus",
+    "buryOrSuspendCards",
+    "setFlag",
+    "removeNotes",
+    "addNoteTags",
+    "removeNoteTags",
+    "customStudy",
+    "customStudyDefaults",
     "deckTree",
     // Klaus's review screen (Anki's reviewer calls these from Python, not a page).
     // Cards render in a sandboxed frame that can't reach /_anki, so card JS never
@@ -103,7 +127,9 @@ const ALLOWED: &[&str] = &[
     "describeNextStates",
     "answerCard",
     "undo",
+    "redo",
     "congratsInfo",
+    "unburyDeck",
     // Sync progress (the sync itself goes through Klaus's methods, which keep
     // the AnkiWeb key out of the page).
     "mediaSyncStatus",
@@ -215,6 +241,7 @@ const HOOKS: &[&str] = &[
     "writeClipboard",
     "saveCustomColours",
     "klausImportPackage",
+    "klausExportPackage",
     "klausPaste",
     "deckOptionsReady",
     "deckOptionsRequireClose",
@@ -222,12 +249,19 @@ const HOOKS: &[&str] = &[
 
 /// Anki host calls that are pure data, answered by the bridge itself.
 const LOCAL: &[&str] = &[
+    "klausModels",
+    "klausFindDuplicates",
+    "klausBrowserRetention",
     "getMetaJson",
     "setMetaJson",
     "getProfileConfigJson",
     "setProfileConfigJson",
     "convertPastedImage",
     "klausRenderCard",
+    "klausLibraryList",
+    "klausLibraryRead",
+    "klausLibraryImport",
+    "klausLibraryFolder",
     "klausSyncAccount",
     "klausAccountSignIn",
     "klausSyncSignOut",
@@ -268,6 +302,8 @@ pub enum CallError {
 
 pub struct Bridge {
     backend: Backend,
+    collection_access: RwLock<()>,
+    models: models::Models,
     /// The open Collection's directory.
     dir: Mutex<Option<PathBuf>>,
     /// Anki keeps profile settings (Qt's pm.meta and pm.profile) outside the
@@ -291,6 +327,8 @@ impl Bridge {
         };
         Ok(Self {
             backend: init_backend(&init.encode_to_vec())?,
+            collection_access: RwLock::new(()),
+            models: models::Models::default(),
             dir: Mutex::new(None),
             settings: Mutex::new(Value::Null),
             account: account::Account::new(secrets),
@@ -301,6 +339,7 @@ impl Bridge {
     /// Opens (creating if needed) the Collection stored in `dir`, using Anki's
     /// profile layout so the files are interchangeable with Anki desktop's.
     pub fn open_collection(&self, dir: &Path) -> Result<(), CallError> {
+        let _access = self.collection_access.write().unwrap();
         // Anki's profile manager creates the media folder; media sync and adding
         // files fail without it.
         std::fs::create_dir_all(dir.join("collection.media")).map_err(|e| CallError::Backend(e.to_string()))?;
@@ -326,18 +365,23 @@ impl Bridge {
     }
 
     pub fn close_collection(&self) -> Result<(), CallError> {
+        let _access = self.collection_access.write().unwrap();
         let req = CloseCollectionRequest { downgrade_to_schema11: false };
-        self.run("closeCollection", &req.encode_to_vec()).map(drop)
+        self.run("closeCollection", &req.encode_to_vec())?;
+        *self.dir.lock().unwrap() = None;
+        Ok(())
     }
 
     /// For calls the shell itself decides to make (and tests); not reachable
     /// from the webview.
     pub fn call_trusted(&self, method: &str, input: &[u8]) -> Result<Vec<u8>, CallError> {
+        let _access = (!is_progress_or_abort(method)).then(|| self.collection_access.read().unwrap());
         self.run(method, input)
     }
 
     /// What the webview reaches: allowlisted methods only.
     pub fn call(&self, method: &str, input: &[u8]) -> Result<Vec<u8>, CallError> {
+        let _access = (!is_progress_or_abort(method)).then(|| self.collection_access.read().unwrap());
         if LOCAL.contains(&method) {
             return self.local(method, input);
         }
@@ -375,6 +419,10 @@ impl Bridge {
         let bad = |e: prost::DecodeError| CallError::Backend(e.to_string());
         let section = if method.contains("Meta") { "meta" } else { "profile" };
         match method {
+            "klausModels" => self.models_call(input),
+            "klausBrowserRetention" => self.browser_retention(input),
+            "klausFindDuplicates" => self.find_duplicates(input),
+            "klausLibraryList" | "klausLibraryRead" | "klausLibraryImport" | "klausLibraryFolder" => self.library_call(method, input),
             "klausRenderCard" => {
                 let req = klaus::RenderCardRequest::decode(input).map_err(bad)?;
                 Ok(self.render_card(req.card_id, req.typed_answer.as_deref())?.encode_to_vec())
@@ -413,14 +461,27 @@ impl Bridge {
     }
 
     fn set_setting(&self, section: &str, key: &str, value: Value) -> Result<(), CallError> {
+        use std::io::Write;
         let mut settings = self.settings.lock().unwrap();
-        if !settings[section].is_object() {
-            settings[section] = Value::Object(Default::default());
+        let mut updated = settings.clone();
+        if !updated[section].is_object() {
+            updated[section] = Value::Object(Default::default());
         }
-        settings[section][key] = value;
+        updated[section][key] = value;
         let dir = self.dir.lock().unwrap().clone().ok_or_else(|| CallError::Backend("no Collection open".into()))?;
-        std::fs::write(dir.join(SETTINGS_FILE), serde_json::to_vec_pretty(&*settings).unwrap())
-            .map_err(|e| CallError::Backend(e.to_string()))
+        let temp = dir.join(format!(".klaus-settings-{:016x}", rand::random::<u64>()));
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp)
+            .map_err(|e| CallError::Backend(e.to_string()))?;
+        let result = (|| {
+            file.write_all(&serde_json::to_vec_pretty(&updated).unwrap())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&temp, dir.join(SETTINGS_FILE))
+        })();
+        let _ = std::fs::remove_file(temp);
+        result.map_err(|e| CallError::Backend(e.to_string()))?;
+        *settings = updated;
+        Ok(())
     }
 
     fn profile(&self, key: &str) -> Value {
@@ -460,12 +521,18 @@ impl Bridge {
                 })
                 .collect()
         };
-        let av = |text: String, question_side: bool| -> Result<String, CallError> {
-            let out: ExtractAvTagsResponse = self.rpc("extractAvTags", ExtractAvTagsRequest { text, question_side })?;
-            Ok(out.text)
+        let av = |text: String, question_side: bool| -> Result<ExtractAvTagsResponse, CallError> {
+            self.rpc("extractAvTags", ExtractAvTagsRequest { text, question_side })
         };
         let question = av(join(&rendered.question_nodes, None), true)?;
-        let answer = av(join(&rendered.answer_nodes, Some(&question)), false)?;
+        let answer = av(join(&rendered.answer_nodes, Some(&question.text)), false)?;
+        let (autoplay, replay_question_audio, interrupt_audio) = self.review_audio_options(card_id)?;
+        let audio = klaus::RenderCardResponse {
+            question_av_tags: question.av_tags,
+            answer_av_tags: answer.av_tags,
+            autoplay, replay_question_audio, interrupt_audio,
+            ..Default::default()
+        };
 
         let display = |text: String| -> Result<String, CallError> {
             let latex: ExtractLatexResponse =
@@ -479,12 +546,12 @@ impl Bridge {
             )?;
             Ok(play_buttons(&escaped.val, hide_buttons.val))
         };
-        let (question, answer) = (display(question)?, display(answer)?);
+        let (question, answer) = (display(question.text)?, display(answer.text)?);
 
         // Type-in answers (aqt/reviewer.py typeAnsQuestionFilter / typeAnsAnswerFilter).
         let type_re = regex::Regex::new(r"\[\[type:(.+?)\]\]").unwrap();
         let Some(spec) = type_re.captures(&question).map(|c| c[1].to_string()) else {
-            return Ok(klaus::RenderCardResponse { question: css(&rendered.css, question), answer: css(&rendered.css, answer) });
+            return Ok(klaus::RenderCardResponse { question: css(&rendered.css, question), answer: css(&rendered.css, answer), ..audio });
         };
         let card: anki_proto::cards::Card = self.rpc("getCard", anki_proto::cards::CardId { cid: card_id })?;
         let note: anki_proto::notes::Note = self.rpc("getNote", anki_proto::notes::NoteId { nid: card.note_id })?;
@@ -539,8 +606,13 @@ impl Bridge {
             }
             _ => type_re.replace_all(&answer, "").into_owned(),
         };
-        Ok(klaus::RenderCardResponse { question: css(&rendered.css, question), answer: css(&rendered.css, answer) })
+        Ok(klaus::RenderCardResponse { question: css(&rendered.css, question), answer: css(&rendered.css, answer), ..audio })
     }
+}
+
+fn is_progress_or_abort(method: &str) -> bool {
+    // Cancellation must remain reachable while a transfer is waiting for sync.
+    matches!(method, "latestProgress" | "setWantsAbort" | "abortSync" | "abortMediaSync" | "mediaSyncStatus")
 }
 
 /// pylib TemplateRenderOutput.question_and_style.

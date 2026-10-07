@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-06",
+  "svelteCheck": {
+    "errors": 0,
+    "warnings": 0,
+    "exitCode": 0
+  },
+  "bridgeTests": {
+    "passed": 46,
+    "failed": 0,
+    "libraryTests": 7,
+    "exitCode": 0
+  },
+  "hostTests": {
+    "passed": 8,
+    "failed": 0,
+    "exitCode": 0
+  },
+  "chromium": {
+    "passed": true,
+    "browser": "chromium",
+    "checks": [
+      "folder and PDF import",
+      "selectable PDF",
+      "paging and search",
+      "hidden-editor text insertion",
+      "card creation",
+      "declined and accepted discard",
+      "pane draft retention",
+      "persisted document",
+      "desktop/dark/mobile layout",
+      "bounded canvas"
+    ],
+    "errors": []
+  },
+  "webkit": {
+    "passed": true,
+    "browser": "webkit",
+    "checks": [
+      "folder and PDF import",
+      "selectable PDF",
+      "paging and search",
+      "hidden-editor text insertion",
+      "card creation",
+      "declined and accepted discard",
+      "pane draft retention",
+      "persisted document",
+      "desktop/dark/mobile layout",
+      "bounded canvas"
+    ],
+    "errors": []
+  },
+  "localDelivery": {
+    "path": "/Applications/Klaus.app",
+    "command": "npm run install:local",
+    "exitCode": 0,
+    "signatureVerified": true,
+    "installedBundleMatchesReleaseBundle": true,
+    "backup": "target/local-install-backups/previous.ZYyb0Q/Klaus.app",
+    "nativeWindowVisuallyVerified": false
+  },
+  "limits": [
+    "Scratch collections and synthetic PDFs only",
+    "Headless discard decisions supplied by the test",
+    "Visible native testing requires verified Desktop 4 placement"
+  ],
+  "topBarUpdate": {
+    "desktopControlsInHeader": true,
+    "narrowControlsInHeader": true,
+    "fiveCapturesRefreshedAndInspected": true
+  }
+}

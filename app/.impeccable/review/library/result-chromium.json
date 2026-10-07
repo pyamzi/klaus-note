@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "browser": "chromium",
+  "checks": [
+    "folder and PDF import",
+    "selectable PDF",
+    "paging and search",
+    "hidden-editor text insertion",
+    "card creation",
+    "declined and accepted discard",
+    "pane draft retention",
+    "persisted document",
+    "desktop/dark/mobile layout",
+    "bounded canvas",
+    "Browser switch saves",
+    "Browser fields and tag saves before navigation",
+    "Browser failed save blocks repeated switch and navigation",
+    "Browser failed save blocks Cards/Notes mode change",
+    "Browser empty search retains failed draft",
+    "Browser retained draft recovery",
+    "Browser successful Cards/Notes mode changes",
+    "Study save preserves Card and answer side",
+    "Study failed Done preserves draft",
+    "Study acknowledged recovery",
+    "Study queue and scheduling unchanged without answering"
+  ],
+  "errors": []
+}

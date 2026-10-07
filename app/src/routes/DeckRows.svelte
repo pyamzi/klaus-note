@@ -36,7 +36,8 @@
           <span class="size-6" aria-hidden="true"></span>
         {/if}
         <a
-          href="/review?deck={deck.deckId}"
+          href="/?deck={deck.deckId}"
+          data-sveltekit-reload
           class="font-medium hover:underline"
           class:text-link={deck.filtered}>{deck.name}</a
         >
@@ -66,6 +67,7 @@
               </DropdownMenu.Item>
             {/if}
             <DropdownMenu.Item onSelect={() => onaction("rename", deck)}>Rename</DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={() => (location.href = `/transfer?deck=${deck.deckId}`)}>Export</DropdownMenu.Item>
           </DropdownMenu.Group>
           <DropdownMenu.Separator />
           <DropdownMenu.Group>

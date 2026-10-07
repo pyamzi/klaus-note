@@ -15,3 +15,7 @@ Every Material is a plain file in a user-chosen folder so any other tool (Previe
 ## Amendment (2026-10-01): edit history
 
 To allow live co-editing later, a Material's edit history (see ADR-0005) is the one source of data besides the files. The files are always kept current from it, so other tools still see everything.
+
+## Amendment (2026-10-06): lecture files
+
+[ADR-0009](0009-lecture-files-preserve-current-content.md) introduces a Lecture-specific exception: the original Source deck is unaltered, and portable lecture files, including Markdown transcripts and structural metadata, preserve all current lecture content independently of edit history. General Materials retain this ADR's existing policy.

@@ -18,4 +18,4 @@ protoc --plugin=protoc-gen-es="$plugin" \
 # Klaus's own bridge messages, as @generated/klaus_pb.
 protoc --plugin=protoc-gen-es="$plugin" \
   --es_out="$out" --es_opt=target=ts \
-  -I crates/bridge/proto crates/bridge/proto/klaus.proto
+  -I crates/bridge/proto -I vendor/anki/proto crates/bridge/proto/klaus.proto

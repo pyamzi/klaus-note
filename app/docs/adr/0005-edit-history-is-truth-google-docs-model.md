@@ -11,3 +11,7 @@ So Materials can later be co-edited live, every edit to a Material (Page text, D
 ## Consequences
 
 The edit history is real user data: it must be backed up, and it is the only non-file source data in Klaus (amends ADR-0002). Whether the merge algorithm is OT or a CRDT (Yjs, Loro, Automerge) is an implementation choice left open.
+
+## Amendment (2026-10-06): lecture portability
+
+For Lectures, [ADR-0009](0009-lecture-files-preserve-current-content.md) requires the lecture folder to restore all current content without an account or separate edit history. History may additionally preserve undo and collaboration. The policy above remains in effect for general Materials.

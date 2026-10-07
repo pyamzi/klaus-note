@@ -82,6 +82,7 @@ impl Bridge {
 
     /// A normal sync (and media sync in the background when enabled). Blocks.
     pub fn sync(&self) -> klaus::SyncOutcome {
+        let _access = self.collection_access.read().unwrap();
         let Some(auth) = self.sync_auth() else { return Self::not_signed_in() };
         let req = anki_proto::sync::SyncCollectionRequest { auth: Some(auth), sync_media: self.sync_account().sync_media };
         match self.run_raw("syncCollection", &req.encode_to_vec()) {
@@ -105,6 +106,7 @@ impl Bridge {
     /// Resolves a full sync. A download first backs the Collection up (Anki's
     /// create_backup_now), since it replaces everything here.
     pub fn full_sync(&self, upload: bool, server_media_usn: Option<i32>) -> klaus::SyncOutcome {
+        let _access = self.collection_access.read().unwrap();
         let Some(auth) = self.sync_auth() else { return Self::not_signed_in() };
         let mut backup_folder = String::new();
         if !upload {
